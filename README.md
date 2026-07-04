@@ -12,11 +12,11 @@ Most agents work from a snapshot and forget. Customs clearance takes days — an
 ```
 Live Translate (call) → persistent CaseFile (discrepancy detected) → Computer Use (portal correction)
        ↓                          ↓                                           ↓
-  Broker ↔ shipper         State survives restart                    Amend mock portal
-  translated live          (the load-bearing primitive)               human confirms before submit
+  Agent ↔ sender            State survives restart                    Amend mock portal
+  translated live           (the load-bearing primitive)               human confirms before submit
 ```
 
-1. **Live Translate** — Broker↔shipper call with real-time translation via `gemini-3.5-live-translate-preview`. Clarifications are captured as facts into the CaseFile.
+1. **Live Translate** — ClearBorder's agent calls the sender directly with real-time translation via `gemini-3.5-live-translate-preview`. No broker needed — clarifications are captured as facts into the CaseFile.
 2. **Persistent CaseFile** *(load-bearing)* — `CaseStore` interface backed by SQLite. Detects discrepancies (invoice vs packing list value mismatch, missing HS code). State survives full process restart and resumes via `environmentId`.
 3. **Computer Use** — `gemini-2.5-computer-use` drives a mock EU customs portal to amend flagged entries. **Halts before Submit** — requires explicit human approval.
 
@@ -79,10 +79,10 @@ All secrets stay in `server/.env` — never shipped to client apps.
 | Phase | Description | Status |
 |-------|-------------|--------|
 | **0** | Scaffold, CaseStore, mock portal | ✅ Complete |
-| **1** | Live Translate → CaseFile | 🔨 In Progress |
-| **2** | Persistent CaseFile, discrepancy detection, resume | ⬜ Pending |
+| **1** | Live Translate → CaseFile | ✅ Complete |
+| **2** | Persistent CaseFile, cold-restart resume | ✅ Complete |
 | **3** | Computer Use + human confirm gate | ⬜ Pending |
-| **4** | Pixel-agents office visualization | ⬜ Pending |
+| **4** | Pixel-agents office visualization | 🔨 Groundwork done |
 | **5** | End-to-end golden path + pitch | ⬜ Pending |
 
 ---
