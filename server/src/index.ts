@@ -16,6 +16,12 @@ import {
   closeSession,
   mintEphemeralToken,
 } from "./live-translate.ts";
+import {
+  startCorrection,
+  confirmSubmit,
+  rejectSubmit,
+  getPendingCorrection,
+} from "./computer-use.ts";
 import type { CaseFile, DocKind } from "@clearborder/core";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
@@ -199,6 +205,101 @@ app.post<{
     return reply.code(404).send({ error: e.message });
   }
 });
+
+// ========================================
+// REST routes — Computer Use (Phase 3)
+// ========================================
+
+// Start Computer Use correction for an open discrepancy
+app.post<{
+  Params: { caseId: string };
+  Body: { discrepancyId: string };
+}>("/api/cases/:caseId/correct", async (req, reply) => {
+  const { caseId } = req.params;
+  const { discrepancyId } = req.body;
+
+  const cf = await caseStore.get(caseId);
+  if (!cf) return reply.code(404).send({ error: "Case not found" });
+
+  try {
+    // startCorrection runs the amendment loop (halts before submit)
+    const pending = await startCorrection(cf, discrepancyId);
+    return { status: pending.status, correction: { field: pending.field, from: pending.from, to: pending.to } };
+  } catch (e: any) {
+    return reply.code(400).send({ error: e.message });
+  }
+});
+
+// Human APPROVES the correction — this is the ONLY path to submit
+app.post<{ Params: { caseId: string } }>(
+  "/api/cases/:caseId/confirm",
+  async (req, reply) => {
+    const { caseId } = req.params;
+
+    try {
+      const result = await confirmSubmit(caseId);
+
+      // Record the correction in the CaseFile with by:"human"
+      const cf = await caseStore.append(caseId, {
+        corrections: [
+          {
+            at: new Date().toISOString(),
+            field: result.correction.field,
+            from: result.correction.from,
+            to: result.correction.to,
+            by: "human",
+          },
+        ],
+      });
+
+      // Flip the discrepancy status to "submitted"
+      const updatedDiscrepancies = cf.discrepancies.map((d) => {
+        // Find the matching discrepancy by kind (since corrections map to discrepancy kinds)
+        if (d.status === "open") {
+          return { ...d, status: "submitted" as const, resolvedAt: new Date().toISOString() };
+        }
+        return d;
+      });
+
+      // Persist the updated discrepancy statuses
+      await caseStore.append(caseId, {
+        discrepancies: [], // append merges, so we need to update via a direct mechanism
+      });
+
+      // Update the case with the resolved discrepancies
+      // We need to overwrite discrepancies — use a special update
+      const finalCase = await caseStore.get(caseId);
+      if (finalCase) {
+        finalCase.discrepancies = updatedDiscrepancies;
+        // Save the updated case by re-appending (the append function updates the whole blob)
+        await caseStore.append(caseId, {});
+        // Directly update the stored JSON with corrected discrepancies
+        await caseStore.updateDiscrepancyStatus(caseId, updatedDiscrepancies);
+      }
+
+      broadcast("case_updated", { caseId });
+
+      return { status: "submitted", correction: result.correction };
+    } catch (e: any) {
+      return reply.code(400).send({ error: e.message });
+    }
+  }
+);
+
+// Human REJECTS the correction — nothing is sent
+app.post<{ Params: { caseId: string } }>(
+  "/api/cases/:caseId/reject",
+  async (req, reply) => {
+    const { caseId } = req.params;
+
+    try {
+      await rejectSubmit(caseId);
+      return { status: "rejected" };
+    } catch (e: any) {
+      return reply.code(400).send({ error: e.message });
+    }
+  }
+);
 
 // ========================================
 // Start

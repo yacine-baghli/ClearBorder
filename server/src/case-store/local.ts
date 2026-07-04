@@ -185,4 +185,18 @@ export class LocalCaseStore implements CaseStore {
   close(): void {
     this.db.close();
   }
+
+  /** Directly update discrepancy statuses in the persisted CaseFile */
+  async updateDiscrepancyStatus(caseId: string, discrepancies: Discrepancy[]): Promise<void> {
+    const caseFile = await this.get(caseId);
+    if (!caseFile) throw new Error(`Case ${caseId} not found`);
+
+    caseFile.discrepancies = discrepancies;
+    caseFile.lastTouchedAt = new Date().toISOString();
+
+    this.db.prepare(`
+      UPDATE cases SET data = ?, last_touched_at = ?
+      WHERE case_id = ?
+    `).run(JSON.stringify(caseFile), caseFile.lastTouchedAt, caseId);
+  }
 }
