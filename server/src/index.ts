@@ -7,7 +7,16 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { LocalCaseStore } from "./case-store/local.ts";
-import type { CaseFile } from "@clearborder/core";
+import { addClient, broadcast } from "./events.ts";
+import {
+  openTranslateSession,
+  simulateDemoCall,
+  getTranscripts,
+  getSessionInfo,
+  closeSession,
+  mintEphemeralToken,
+} from "./live-translate.ts";
+import type { CaseFile, DocKind } from "@clearborder/core";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
 const CASE_STORE = process.env.CASE_STORE ?? "local";
@@ -29,27 +38,23 @@ const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
 await app.register(websocket);
 
-// --- WebSocket event bus ---
-const wsClients = new Set<import("ws").WebSocket>();
-
+// --- WebSocket ---
 app.register(async function wsRoutes(fastify) {
   fastify.get("/ws", { websocket: true }, (socket, _req) => {
-    wsClients.add(socket);
-    socket.on("close", () => wsClients.delete(socket));
+    addClient(socket);
   });
 });
 
-function broadcast(event: string, data: unknown) {
-  const msg = JSON.stringify({ event, data, at: new Date().toISOString() });
-  for (const ws of wsClients) {
-    if (ws.readyState === 1) ws.send(msg);
-  }
-}
-
-// --- REST routes ---
+// ========================================
+// REST routes — Cases
+// ========================================
 
 // Health check
-app.get("/health", async () => ({ status: "ok", store: CASE_STORE }));
+app.get("/health", async () => ({
+  status: "ok",
+  store: CASE_STORE,
+  demoMode: process.env.DEMO_MODE === "true",
+}));
 
 // Create a new case
 app.post<{ Body: Partial<CaseFile> }>("/api/cases", async (req, reply) => {
@@ -106,11 +111,104 @@ app.post<{ Params: { caseId: string } }>(
   }
 );
 
-// --- Start ---
+// ========================================
+// REST routes — Live Translate
+// ========================================
+
+// Start a Live Translate session
+app.post<{ Body: { caseId: string; targetLanguageCode: string } }>(
+  "/api/translate/start",
+  async (req, reply) => {
+    const { caseId, targetLanguageCode } = req.body;
+
+    // Verify the case exists
+    const cf = await caseStore.get(caseId);
+    if (!cf) return reply.code(404).send({ error: "Case not found" });
+
+    const result = await openTranslateSession({ targetLanguageCode, caseId });
+    return result;
+  }
+);
+
+// Run the demo simulation (push pre-scripted transcripts)
+app.post<{ Body: { caseId: string } }>(
+  "/api/translate/demo",
+  async (req, reply) => {
+    const { caseId } = req.body;
+    // Run the demo call asynchronously — transcripts stream via WS
+    simulateDemoCall(caseId).catch((err) =>
+      console.error("Demo simulation error:", err)
+    );
+    return { status: "started", caseId };
+  }
+);
+
+// Get current transcripts
+app.get("/api/translate/transcripts", async () => {
+  return { transcripts: getTranscripts() };
+});
+
+// Get session info
+app.get("/api/translate/session", async () => {
+  return { session: getSessionInfo() };
+});
+
+// Close the current translate session
+app.post("/api/translate/close", async () => {
+  closeSession();
+  return { status: "closed" };
+});
+
+// Mint an ephemeral token for the console
+app.post<{ Body: { targetLanguageCode: string } }>(
+  "/api/translate/token",
+  async (req) => {
+    const token = await mintEphemeralToken(req.body.targetLanguageCode);
+    return token;
+  }
+);
+
+// ========================================
+// REST routes — Capture as Fact
+// ========================================
+
+// "Capture as fact" — operator captures a transcript value into the CaseFile
+app.post<{
+  Params: { caseId: string };
+  Body: { docKind: DocKind; value: string };
+}>("/api/cases/:caseId/capture", async (req, reply) => {
+  const { caseId } = req.params;
+  const { docKind, value } = req.body;
+
+  try {
+    const cf = await caseStore.append(caseId, {
+      documents: {
+        [docKind]: { value, source: "call" as const },
+      },
+    });
+
+    broadcast("fact_captured", {
+      caseId,
+      docKind,
+      value,
+      source: "call",
+    });
+
+    return cf;
+  } catch (e: any) {
+    return reply.code(404).send({ error: e.message });
+  }
+});
+
+// ========================================
+// Start
+// ========================================
+
 try {
   await app.listen({ port: PORT, host: "0.0.0.0" });
   console.log(`🚀 ClearBorder server running on http://localhost:${PORT}`);
   console.log(`   CaseStore: ${CASE_STORE}`);
+  console.log(`   Demo mode: ${process.env.DEMO_MODE ?? "false"}`);
 } catch (err) {
   app.log.error(err);
   process.exit(1);
