@@ -4,12 +4,6 @@ const API = "http://localhost:3001";
 const WS_URL = "ws://localhost:3001/ws";
 
 // --- Types ---
-interface TranscriptEntry {
-  direction: "in" | "out";
-  text: string;
-  timestamp: string;
-}
-
 interface DocEntry {
   value: string;
   source: "call" | "portal" | "upload";
@@ -30,6 +24,7 @@ interface CaseFile {
   documents: Record<string, DocEntry | undefined>;
   discrepancies: Discrepancy[];
   corrections: Array<{ at: string; field: string; from?: string; to: string; by: string }>;
+  openQueries: Array<{ id: string; question: string; answer?: string; status: string }>;
   lastTouchedAt: string;
   day: number;
 }
@@ -50,6 +45,85 @@ const DOC_ICONS: Record<DocKind, string> = {
   value_proof: "🔐",
 };
 
+// --- Pre-loaded sender message (the "email") ---
+interface SenderMessage {
+  id: string;
+  from: string;
+  fromEmail: string;
+  subject: string;
+  date: string;
+  originalLang: string;
+  body: string;
+  translatedBody: string;
+  extractableData: Array<{
+    label: string;
+    value: string;
+    docKind: DocKind;
+    highlight: string; // text to highlight in the body
+  }>;
+}
+
+const SENDER_MESSAGE: SenderMessage = {
+  id: "msg-001",
+  from: "Li Wei (丽维太阳能科技)",
+  fromEmail: "li.wei@solartech-shenzhen.cn",
+  subject: "RE: Shipment SHIP-2026-CBR-001 — Invoice & Packing Details",
+  date: "2026-07-04T14:32:00Z",
+  originalLang: "zh-CN",
+  body: `尊敬的合作伙伴，
+
+关于运单 SHIP-2026-CBR-001，请查收以下贸易文件信息：
+
+发票金额：47,250.00 欧元（含 CIF 运费）
+装箱单金额：45,000.00 欧元（FOB 出厂价）
+HS 编码：8541.40.90（单晶硅光伏面板，400W 组件）
+
+请注意：发票金额包含了从深圳到汉堡的 CIF 运费（2,250 欧元），因此高于装箱单金额。
+
+如需进一步文件，请告知。
+
+此致敬礼,
+李维
+丽维太阳能科技有限公司
+中国深圳`,
+  translatedBody: `Dear Partner,
+
+Regarding shipment SHIP-2026-CBR-001, please find the trade document information below:
+
+**Invoice value: €47,250.00** (including CIF freight charges)
+**Packing list value: €45,000.00** (FOB ex-works price)
+**HS Code: 8541.40.90** (Monocrystalline silicon PV panels, 400W modules)
+
+Please note: The invoice value includes CIF freight from Shenzhen to Hamburg (€2,250), hence it is higher than the packing list value.
+
+If you need further documentation, please let me know.
+
+Best regards,
+Li Wei
+SolarTech Shenzhen Ltd.
+Shenzhen, China`,
+  extractableData: [
+    {
+      label: "Invoice Value",
+      value: "€47,250.00",
+      docKind: "invoice",
+      highlight: "Invoice value: €47,250.00",
+    },
+    {
+      label: "Packing List Value",
+      value: "€45,000.00",
+      docKind: "packing_list",
+      highlight: "Packing list value: €45,000.00",
+    },
+    {
+      label: "HS Code",
+      value: "8541.40.90",
+      docKind: "hs_code",
+      highlight: "HS Code: 8541.40.90",
+    },
+  ],
+};
+
 // --- Toast ---
 interface Toast {
   id: number;
@@ -61,11 +135,9 @@ let toastCounter = 0;
 
 export default function App() {
   const [caseFile, setCaseFile] = useState<CaseFile | null>(null);
-  const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
-  const [isCallActive, setIsCallActive] = useState(false);
-  const [isTranslating, setIsTranslating] = useState(false);
+  const [messageLoaded, setMessageLoaded] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
-  const [targetLang, setTargetLang] = useState("en");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [captureModal, setCaptureModal] = useState<{
     open: boolean;
@@ -73,8 +145,18 @@ export default function App() {
     docKind: DocKind;
     value: string;
   }>({ open: false, text: "", docKind: "invoice", value: "" });
+  const [confirmCard, setConfirmCard] = useState<{
+    open: boolean;
+    caseId: string;
+    discrepancyId: string;
+    field: string;
+    fieldLabel: string;
+    from: string;
+    to: string;
+    message: string;
+  } | null>(null);
+  const [isCorrecing, setIsCorrecing] = useState(false);
 
-  const feedRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   // --- Toast helper ---
@@ -93,27 +175,13 @@ export default function App() {
       ws.onopen = () => setWsConnected(true);
       ws.onclose = () => {
         setWsConnected(false);
-        setTimeout(connect, 2000); // reconnect
+        setTimeout(connect, 2000);
       };
 
       ws.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data);
           switch (msg.event) {
-            case "transcript":
-              setTranscripts((prev) => [...prev, {
-                direction: msg.data.direction,
-                text: msg.data.text,
-                timestamp: msg.data.timestamp,
-              }]);
-              break;
-            case "live_translate_active":
-              setIsTranslating(true);
-              break;
-            case "live_translate_closed":
-              setIsTranslating(false);
-              setIsCallActive(false);
-              break;
             case "fact_captured":
               showToast("success", `Captured ${DOC_LABELS[msg.data.docKind as DocKind] ?? msg.data.docKind}: ${msg.data.value}`);
               refreshCase();
@@ -121,6 +189,32 @@ export default function App() {
             case "case_updated":
             case "discrepancy_detected":
               refreshCase();
+              break;
+            case "needs_confirmation":
+              setIsCorrecing(false);
+              setConfirmCard({
+                open: true,
+                caseId: msg.data.caseId,
+                discrepancyId: msg.data.discrepancyId,
+                field: msg.data.correction.field,
+                fieldLabel: msg.data.correction.fieldLabel,
+                from: msg.data.correction.from,
+                to: msg.data.correction.to,
+                message: msg.data.message,
+              });
+              break;
+            case "correction_submitted":
+              showToast("success", `Correction submitted: ${msg.data.correction.field}`);
+              setConfirmCard(null);
+              refreshCase();
+              break;
+            case "correction_rejected":
+              showToast("info", "Correction rejected — nothing was submitted");
+              setConfirmCard(null);
+              refreshCase();
+              break;
+            case "computer_use_step":
+              showToast("info", `🖥️ ${msg.data.step.description}`);
               break;
           }
         } catch { /* ignore parse errors */ }
@@ -132,13 +226,6 @@ export default function App() {
       if (wsRef.current) wsRef.current.close();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // --- Auto-scroll transcript ---
-  useEffect(() => {
-    if (feedRef.current) {
-      feedRef.current.scrollTop = feedRef.current.scrollHeight;
-    }
-  }, [transcripts]);
 
   // --- API helpers ---
   async function createCase() {
@@ -167,35 +254,11 @@ export default function App() {
     }
   }
 
-  async function startCall() {
+  async function loadMessage() {
     let cf = caseFile;
     if (!cf) cf = await createCase();
-
-    setIsCallActive(true);
-    setTranscripts([]);
-
-    // Start translate session
-    await fetch(`${API}/api/translate/start`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ caseId: cf.caseId, targetLanguageCode: targetLang }),
-    });
-
-    // In demo mode, run the simulated call
-    await fetch(`${API}/api/translate/demo`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ caseId: cf.caseId }),
-    });
-
-    showToast("info", "Demo call started — transcripts streaming");
-  }
-
-  async function endCall() {
-    await fetch(`${API}/api/translate/close`, { method: "POST" });
-    setIsCallActive(false);
-    setIsTranslating(false);
-    showToast("info", "Call ended");
+    setMessageLoaded(true);
+    showToast("info", "📧 Sender message loaded — extract key facts below");
   }
 
   async function captureAsFact() {
@@ -213,6 +276,16 @@ export default function App() {
     await refreshCase();
   }
 
+  async function quickCapture(data: typeof SENDER_MESSAGE.extractableData[0]) {
+    if (!caseFile) return;
+    await fetch(`${API}/api/cases/${caseFile.caseId}/capture`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ docKind: data.docKind, value: data.value }),
+    });
+    await refreshCase();
+  }
+
   async function detectDiscrepancies() {
     if (!caseFile) return;
     const res = await fetch(`${API}/api/cases/${caseFile.caseId}/discrepancies`, {
@@ -227,6 +300,34 @@ export default function App() {
     await refreshCase();
   }
 
+  // --- Computer Use ---
+  async function fixWithAgent(discrepancyId: string) {
+    if (!caseFile) return;
+    setIsCorrecing(true);
+    showToast("info", "🖥️ Starting Computer Use agent…");
+    await fetch(`${API}/api/cases/${caseFile.caseId}/correct`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ discrepancyId }),
+    });
+  }
+
+  async function approveCorrection() {
+    if (!confirmCard) return;
+    await fetch(`${API}/api/cases/${confirmCard.caseId}/confirm`, {
+      method: "POST",
+    });
+    await refreshCase();
+  }
+
+  async function rejectCorrection() {
+    if (!confirmCard) return;
+    await fetch(`${API}/api/cases/${confirmCard.caseId}/reject`, {
+      method: "POST",
+    });
+    setConfirmCard(null);
+  }
+
   // --- Format time ---
   function formatTime(ts: string): string {
     try {
@@ -234,6 +335,20 @@ export default function App() {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  }
+
+  function formatDate(ts: string): string {
+    try {
+      return new Date(ts).toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
       });
     } catch {
       return "";
@@ -254,12 +369,6 @@ export default function App() {
         </div>
         <div className="header-right">
           {caseFile && <span className="day-badge">Day {caseFile.day}</span>}
-          {isTranslating && (
-            <span className="live-indicator">
-              <span className="dot" />
-              LIVE
-            </span>
-          )}
           <span className={`status-badge ${wsConnected ? "connected" : "disconnected"}`}>
             <span className="status-dot" />
             {wsConnected ? "Connected" : "Disconnected"}
@@ -269,95 +378,125 @@ export default function App() {
 
       {/* ===== Main Layout ===== */}
       <main className="console-main">
-        {/* Left — Transcript */}
+        {/* Left — Sender Message */}
         <div className="transcript-panel">
           <div className="panel-header">
             <div className="panel-title">
-              <span className="icon">🎙️</span>
-              Live Translate — Agent ↔ Sender Call
+              <span className="icon">📧</span>
+              Sender Communication
             </div>
-            <div className="panel-actions">
-              <select
-                className="language-select"
-                value={targetLang}
-                onChange={(e) => setTargetLang(e.target.value)}
-                disabled={isCallActive}
-              >
-                <option value="en">English</option>
-                <option value="fr">French</option>
-                <option value="de">German</option>
-                <option value="es">Spanish</option>
-                <option value="zh">Chinese</option>
-                <option value="ar">Arabic</option>
-              </select>
-            </div>
+            {messageLoaded && (
+              <div className="panel-actions">
+                <button
+                  className={`btn ${showOriginal ? "primary" : ""}`}
+                  style={{ fontSize: "0.65rem", padding: "0.2rem 0.5rem" }}
+                  onClick={() => setShowOriginal(!showOriginal)}
+                >
+                  {showOriginal ? "🇬🇧 Show Translation" : "🇨🇳 Show Original"}
+                </button>
+              </div>
+            )}
           </div>
 
-          {transcripts.length === 0 ? (
+          {!messageLoaded ? (
             <div className="transcript-empty">
-              <span className="icon">🌐</span>
-              <p>ClearBorder's agent calls the sender directly — no broker needed</p>
+              <span className="icon">📧</span>
+              <p>Load a sender message to start building a CaseFile</p>
             </div>
           ) : (
-            <div className="transcript-feed" ref={feedRef}>
-              {transcripts.map((t, i) => (
-                <div key={i} className={`transcript-entry ${t.direction}`}>
-                  <div className="transcript-avatar">
-                    {t.direction === "in" ? "🇨🇳" : "🤖"}
+            <div className="message-view">
+              {/* Email header */}
+              <div className="message-header">
+                <div className="message-from">
+                  <span className="message-avatar">🇨🇳</span>
+                  <div>
+                    <div className="message-sender">{SENDER_MESSAGE.from}</div>
+                    <div className="message-email">{SENDER_MESSAGE.fromEmail}</div>
                   </div>
-                  <div className="transcript-content">
-                    <div className="transcript-meta">
-                      <span className="transcript-speaker">
-                        {t.direction === "in" ? "Sender (Original)" : "ClearBorder Agent"}
-                      </span>
-                      <span className="transcript-time">{formatTime(t.timestamp)}</span>
-                    </div>
-                    <div className="transcript-text">{t.text}</div>
-                  </div>
-                  {/* Capture button on translated output */}
-                  {t.direction === "out" && (
-                    <button
-                      className="btn"
-                      style={{ fontSize: "0.7rem", padding: "0.25rem 0.5rem", flexShrink: 0 }}
-                      onClick={() =>
-                        setCaptureModal({
-                          open: true,
-                          text: t.text,
-                          docKind: "invoice",
-                          value: t.text,
-                        })
+                </div>
+                <div className="message-date">{formatDate(SENDER_MESSAGE.date)}</div>
+              </div>
+              <div className="message-subject">
+                {SENDER_MESSAGE.subject}
+              </div>
+
+              {/* Email body */}
+              <div className="message-body">
+                {showOriginal ? (
+                  <pre className="message-original">{SENDER_MESSAGE.body}</pre>
+                ) : (
+                  <div className="message-translated">
+                    {SENDER_MESSAGE.translatedBody.split("\n").map((line, i) => {
+                      // Bold lines with **
+                      if (line.startsWith("**") && line.endsWith("**")) {
+                        const inner = line.slice(2, -2);
+                        return (
+                          <p key={i} className="message-highlight">
+                            {inner}
+                          </p>
+                        );
                       }
-                      title="Capture as fact"
-                    >
-                      📌 Capture
-                    </button>
-                  )}
-                </div>
-              ))}
-              {isTranslating && (
-                <div className="typing-indicator">
-                  <div className="typing-dots">
-                    <span />
-                    <span />
-                    <span />
+                      if (line.trim() === "") return <br key={i} />;
+                      return <p key={i}>{line}</p>;
+                    })}
                   </div>
-                  <span className="typing-label">Translating…</span>
+                )}
+              </div>
+
+              {/* Extractable Data — Quick Capture */}
+              <div className="extract-section">
+                <div className="extract-title">📌 Extractable Data</div>
+                <div className="extract-grid">
+                  {SENDER_MESSAGE.extractableData.map((d) => {
+                    const alreadyCaptured = caseFile?.documents[d.docKind];
+                    return (
+                      <div className={`extract-card ${alreadyCaptured ? "captured" : ""}`} key={d.docKind}>
+                        <div className="extract-label">{d.label}</div>
+                        <div className="extract-value">{d.value}</div>
+                        {alreadyCaptured ? (
+                          <span className="extract-badge captured">✓ Captured</span>
+                        ) : (
+                          <button
+                            className="btn primary"
+                            style={{ fontSize: "0.65rem", padding: "0.2rem 0.5rem" }}
+                            onClick={() => quickCapture(d)}
+                            id={`capture-${d.docKind}`}
+                          >
+                            📌 Capture
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
+              </div>
             </div>
           )}
 
-          {/* Call Controls */}
+          {/* Controls */}
           <div className="call-controls">
-            {!isCallActive ? (
-              <button className="btn primary" onClick={startCall} id="startCallBtn">
-                <span className="icon">📞</span>
-                Call Sender
+            {!messageLoaded ? (
+              <button className="btn primary" onClick={loadMessage} id="loadMessageBtn">
+                <span className="icon">📧</span>
+                Load Sender Message
               </button>
             ) : (
-              <button className="btn danger" onClick={endCall} id="endCallBtn">
-                <span className="icon">📵</span>
-                End Call
+              <button
+                className="btn"
+                onClick={() => {
+                  // Capture all remaining data at once
+                  const uncaptured = SENDER_MESSAGE.extractableData.filter(
+                    (d) => !caseFile?.documents[d.docKind]
+                  );
+                  uncaptured.forEach((d) => quickCapture(d));
+                }}
+                id="captureAllBtn"
+                disabled={SENDER_MESSAGE.extractableData.every(
+                  (d) => caseFile?.documents[d.docKind]
+                )}
+              >
+                <span className="icon">📌</span>
+                Capture All Facts
               </button>
             )}
             {caseFile && (
@@ -381,7 +520,7 @@ export default function App() {
           <div className="case-panel-content">
             {!caseFile ? (
               <div className="doc-empty">
-                Call a sender to start building a CaseFile
+                Load a sender message to start building a CaseFile
               </div>
             ) : (
               <>
@@ -423,7 +562,7 @@ export default function App() {
                   </div>
                   {Object.keys(caseFile.documents).filter((k) => caseFile.documents[k]).length === 0 ? (
                     <div className="doc-empty">
-                      No documents captured yet. Use "Capture" on a transcript.
+                      No documents captured yet. Use "Capture" on the sender message.
                     </div>
                   ) : (
                     <div className="doc-list">
@@ -454,9 +593,22 @@ export default function App() {
                         <div className={`discrepancy-item ${d.status}`} key={d.id}>
                           <div className="discrepancy-kind">{d.kind.replace(/_/g, " ")}</div>
                           <div className="discrepancy-detail">{d.detail}</div>
-                          <span className={`discrepancy-status ${d.status}`}>
-                            {d.status === "open" ? "⚠ Open" : `✓ ${d.status}`}
-                          </span>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.375rem" }}>
+                            <span className={`discrepancy-status ${d.status}`}>
+                              {d.status === "open" ? "⚠ Open" : `✓ ${d.status}`}
+                            </span>
+                            {d.status === "open" && (
+                              <button
+                                className="btn primary"
+                                style={{ fontSize: "0.65rem", padding: "0.2rem 0.5rem" }}
+                                onClick={() => fixWithAgent(d.id)}
+                                disabled={isCorrecing}
+                                id={`fixBtn-${d.id}`}
+                              >
+                                {isCorrecing ? "🖥️ Agent working…" : "🖥️ Fix with Agent"}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -498,11 +650,11 @@ export default function App() {
           <div className="capture-modal" onClick={(e) => e.stopPropagation()}>
             <div className="capture-modal-header">
               <h3>📌 Capture as Fact</h3>
-              <p>Save this transcript as a document value in the CaseFile</p>
+              <p>Save this data as a document value in the CaseFile</p>
             </div>
             <div className="capture-modal-body">
               <div className="capture-field">
-                <label>Transcript</label>
+                <label>Source Text</label>
                 <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontStyle: "italic", padding: "0.5rem", background: "var(--bg-elevated)", borderRadius: "6px" }}>
                   "{captureModal.text}"
                 </div>
@@ -543,6 +695,44 @@ export default function App() {
               <button className="btn primary" onClick={captureAsFact} id="confirmCaptureBtn">
                 <span className="icon">📌</span>
                 Capture
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Confirm Card ===== */}
+      {confirmCard && (
+        <div className="capture-overlay">
+          <div className="capture-modal" style={{ maxWidth: "480px" }}>
+            <div className="capture-modal-header" style={{ background: "rgba(245, 158, 11, 0.08)", borderBottom: "1px solid rgba(245, 158, 11, 0.2)" }}>
+              <h3>⚠️ Human Confirmation Required</h3>
+              <p>{confirmCard.message}</p>
+            </div>
+            <div className="capture-modal-body">
+              <div className="capture-field">
+                <label>Proposed Correction</label>
+                <div style={{ padding: "0.75rem", background: "var(--bg-elevated)", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.375rem" }}>
+                    Field: <strong style={{ color: "var(--accent-light)" }}>{confirmCard.fieldLabel}</strong>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", fontSize: "0.9rem" }}>
+                    <span style={{ textDecoration: "line-through", color: "var(--error)", opacity: 0.8 }}>{confirmCard.from}</span>
+                    <span style={{ color: "var(--text-muted)" }}>→</span>
+                    <span style={{ color: "var(--success)", fontWeight: 600 }}>{confirmCard.to}</span>
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: "0.75rem", background: "rgba(245, 158, 11, 0.06)", borderRadius: "8px", border: "1px solid rgba(245, 158, 11, 0.15)", fontSize: "0.78rem", color: "var(--warning)" }}>
+                ⚠️ The Computer Use agent has filled the correction in the portal but has <strong>NOT submitted</strong> the declaration. Only your explicit approval will trigger submission.
+              </div>
+            </div>
+            <div className="capture-modal-footer">
+              <button className="btn danger" onClick={rejectCorrection} id="rejectCorrectionBtn">
+                ✗ Reject
+              </button>
+              <button className="btn success" onClick={approveCorrection} id="approveCorrectionBtn">
+                ✓ Approve &amp; Submit
               </button>
             </div>
           </div>
