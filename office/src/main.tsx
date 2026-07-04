@@ -5,20 +5,6 @@ import "./index.css";
 // =====================================================
 // ClearBorder Office — Pixel-Agents Visualization Shell
 // =====================================================
-// Three agents animate from real backend events:
-//   🌐 Translator — Live Translate call activity
-//   📁 Case-file  — CaseFile reads, discrepancy detection
-//   🖥️ Portal     — Computer Use portal amendments
-//
-// WS events → agent state machine:
-//   live_translate_active → Translator types
-//   transcript            → Translator types
-//   fact_captured         → Case-file reads
-//   discrepancy_detected  → Case-file reads
-//   computer_use_step     → Portal types
-//   needs_confirmation    → Portal waiting (speech bubble)
-//   day_closed            → all idle/sleep
-//   resumed               → wake + walk to desks
 
 const WS_URL = "ws://localhost:3001/ws";
 
@@ -27,28 +13,132 @@ type AgentState = "idle" | "walking" | "typing" | "reading" | "waiting" | "sleep
 interface Agent {
   id: string;
   name: string;
-  emoji: string;
   role: string;
   state: AgentState;
   message?: string;
-  color: string;
+  skinColor: string;
+  shirtColor: string;
+  deskX: number; // percent position on floor
+  deskY: number;
 }
 
 const INITIAL_AGENTS: Agent[] = [
-  { id: "translator", name: "Translator", emoji: "🌐", role: "Live Translate", state: "idle", color: "#f59e0b" },
-  { id: "casefile", name: "Case-file", emoji: "📁", role: "Persistence", state: "idle", color: "#3b82f6" },
-  { id: "portal", name: "Portal", emoji: "🖥️", role: "Computer Use", state: "idle", color: "#10b981" },
+  { id: "translator", name: "Translator", role: "Live Translate", state: "idle", skinColor: "#ffd5a5", shirtColor: "#f59e0b", deskX: 15, deskY: 50 },
+  { id: "casefile", name: "Case-file", role: "Persistence", state: "idle", skinColor: "#e8c9a0", shirtColor: "#3b82f6", deskX: 50, deskY: 50 },
+  { id: "portal", name: "Portal", role: "Computer Use", state: "idle", skinColor: "#d4a574", shirtColor: "#10b981", deskX: 85, deskY: 50 },
 ];
 
-// State label config
-const STATE_LABELS: Record<AgentState, { label: string; icon: string }> = {
-  idle: { label: "Idle", icon: "💤" },
-  walking: { label: "Walking to desk", icon: "🚶" },
-  typing: { label: "Working", icon: "⌨️" },
-  reading: { label: "Analyzing", icon: "📖" },
-  waiting: { label: "Waiting for input", icon: "⏳" },
-  sleeping: { label: "Sleeping", icon: "😴" },
+const STATE_CONFIG: Record<AgentState, { label: string; glowColor: string }> = {
+  idle: { label: "Idle", glowColor: "transparent" },
+  walking: { label: "Walking", glowColor: "rgba(129, 140, 248, 0.4)" },
+  typing: { label: "Working", glowColor: "rgba(16, 185, 129, 0.5)" },
+  reading: { label: "Analyzing", glowColor: "rgba(59, 130, 246, 0.5)" },
+  waiting: { label: "Awaiting Input", glowColor: "rgba(245, 158, 11, 0.5)" },
+  sleeping: { label: "Sleeping", glowColor: "transparent" },
 };
+
+function PixelAgent({ agent }: { agent: Agent }) {
+  const { state, skinColor, shirtColor } = agent;
+  const isSleeping = state === "sleeping";
+  const isActive = state === "typing" || state === "reading";
+  const isWaiting = state === "waiting";
+  const isWalking = state === "walking";
+
+  return (
+    <div
+      className={`pixel-workstation ${state}`}
+      style={{ left: `${agent.deskX}%`, top: `${agent.deskY}%` }}
+    >
+      {/* Glow under character when active */}
+      {isActive && (
+        <div className="agent-glow" style={{ background: STATE_CONFIG[state].glowColor }} />
+      )}
+
+      {/* Desk */}
+      <div className="pixel-desk">
+        <div className="desk-top" />
+        <div className="desk-legs" />
+        {/* Monitor */}
+        <div className={`pixel-monitor ${isActive ? "on" : ""} ${isSleeping ? "off" : ""}`}>
+          <div className="monitor-screen">
+            {isActive && <div className="screen-lines" />}
+            {isSleeping && <div className="screen-off" />}
+          </div>
+          <div className="monitor-stand" />
+        </div>
+      </div>
+
+      {/* Character */}
+      <div className={`pixel-character ${state}`}>
+        {/* Shadow */}
+        <div className="char-shadow" />
+
+        {/* Body group */}
+        <div className="char-body-group">
+          {/* Head */}
+          <div className="char-head" style={{ background: skinColor }}>
+            {/* Hair */}
+            <div className="char-hair" style={{ background: shirtColor }} />
+            {/* Eyes */}
+            <div className="char-eyes">
+              <div className={`char-eye left ${isSleeping ? "closed" : ""}`} />
+              <div className={`char-eye right ${isSleeping ? "closed" : ""}`} />
+            </div>
+          </div>
+
+          {/* Torso */}
+          <div className="char-torso" style={{ background: shirtColor }}>
+            <div className="char-collar" style={{ background: skinColor }} />
+          </div>
+
+          {/* Arms */}
+          <div className={`char-arms ${state}`}>
+            <div className="char-arm left" style={{ background: shirtColor }} />
+            <div className="char-arm right" style={{ background: shirtColor }} />
+          </div>
+
+          {/* Legs */}
+          <div className={`char-legs ${state}`}>
+            <div className="char-leg left" />
+            <div className="char-leg right" />
+          </div>
+        </div>
+
+        {/* ZZZ for sleeping */}
+        {isSleeping && (
+          <div className="zzz-container">
+            <span className="zzz z1">z</span>
+            <span className="zzz z2">z</span>
+            <span className="zzz z3">Z</span>
+          </div>
+        )}
+
+        {/* Waiting bubble */}
+        {isWaiting && (
+          <div className="wait-bubble">
+            <span>?</span>
+          </div>
+        )}
+      </div>
+
+      {/* Chair */}
+      <div className="pixel-chair" />
+
+      {/* Name tag */}
+      <div className="agent-nametag">
+        <span className="nametag-name">{agent.name}</span>
+        <span className={`nametag-status ${state}`}>{STATE_CONFIG[state].label}</span>
+      </div>
+
+      {/* Speech bubble */}
+      {agent.message && (
+        <div className="pixel-speech">
+          {agent.message}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function App() {
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
@@ -57,7 +147,6 @@ function App() {
   const [dayInfo, setDayInfo] = useState<{ day: number; status: "active" | "closed" }>({ day: 1, status: "active" });
   const logRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll event log
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [eventLog]);
@@ -68,18 +157,16 @@ function App() {
 
   function logEvent(event: string, agent?: string) {
     setEventLog((prev) => [
-      ...prev.slice(-50), // keep last 50
+      ...prev.slice(-50),
       { event, time: new Date().toLocaleTimeString(), agent },
     ]);
   }
 
-  // Auto-reset agent to idle after activity
   function setAgentTemporary(id: string, state: AgentState, message: string | undefined, durationMs: number) {
     updateAgent(id, { state, message });
     setTimeout(() => updateAgent(id, { state: "idle", message: undefined }), durationMs);
   }
 
-  // WebSocket connection
   useEffect(() => {
     function connect() {
       const ws = new WebSocket(WS_URL);
@@ -101,14 +188,14 @@ function App() {
     function handleEvent(event: string, data: any) {
       switch (event) {
         case "live_translate_active":
-          updateAgent("translator", { state: "typing", message: `Translating (${data.targetLanguage ?? "en"})` });
-          logEvent("Call started — translating", "translator");
+          updateAgent("translator", { state: "typing", message: "Translating…" });
+          logEvent("Translator active", "translator");
           break;
 
         case "transcript":
           setAgentTemporary("translator", "typing",
             data.direction === "in" ? "Listening…" : "Translating…", 2000);
-          logEvent(`Transcript: "${(data.text ?? "").slice(0, 40)}…"`, "translator");
+          logEvent(`"${(data.text ?? "").slice(0, 30)}…"`, "translator");
           break;
 
         case "live_translate_closed":
@@ -118,56 +205,55 @@ function App() {
 
         case "fact_captured":
           setAgentTemporary("casefile", "reading", `Captured: ${data.docKind}`, 3000);
-          logEvent(`Fact captured: ${data.docKind} = ${data.value}`, "casefile");
+          logEvent(`Fact: ${data.docKind} = ${data.value}`, "casefile");
           break;
 
         case "case_created":
-          setAgentTemporary("casefile", "typing", "New case file created", 2000);
-          logEvent("New case created", "casefile");
+          setAgentTemporary("casefile", "typing", "New case created", 2000);
+          logEvent("Case created", "casefile");
           break;
 
         case "case_updated":
-          setAgentTemporary("casefile", "reading", "Case updated", 1500);
-          logEvent("Case file updated", "casefile");
+          setAgentTemporary("casefile", "reading", "Updating case…", 1500);
+          logEvent("Case updated", "casefile");
           break;
 
         case "discrepancy_detected":
-          updateAgent("casefile", { state: "reading", message: `⚠️ ${data.discrepancies?.length ?? 0} discrepancy(s) found!` });
-          logEvent(`Discrepancy detected!`, "casefile");
+          updateAgent("casefile", { state: "reading", message: `⚠️ Discrepancy found!` });
+          logEvent("Discrepancy detected!", "casefile");
           setTimeout(() => updateAgent("casefile", { state: "idle", message: undefined }), 5000);
           break;
 
         case "computer_use_step":
-          setAgentTemporary("portal", "typing", `Amending: ${data.step?.action ?? "…"}`, 2000);
-          logEvent("Portal amendment step", "portal");
+          setAgentTemporary("portal", "typing", data.step?.description ?? "Amending…", 2000);
+          logEvent(data.step?.description ?? "Portal step", "portal");
           break;
 
         case "needs_confirmation":
-          updateAgent("portal", { state: "waiting", message: "⏳ Waiting for human approval" });
-          logEvent("Awaiting confirmation before submit", "portal");
+          updateAgent("portal", { state: "waiting", message: "Awaiting approval…" });
+          logEvent("Waiting for human approval", "portal");
           break;
 
         case "correction_submitted":
-          setAgentTemporary("portal", "typing", "✅ Correction submitted!", 3000);
-          logEvent("Correction approved & submitted", "portal");
+          setAgentTemporary("portal", "typing", "✅ Submitted!", 3000);
+          logEvent("Correction submitted", "portal");
           break;
 
         case "correction_rejected":
           updateAgent("portal", { state: "idle", message: undefined });
-          logEvent("Correction rejected — standing down", "portal");
+          logEvent("Correction rejected", "portal");
           break;
 
         case "day_closed":
           setAgents((prev) => prev.map((a) => ({ ...a, state: "sleeping" as const, message: "💤 End of day" })));
           setDayInfo((prev) => ({ ...prev, status: "closed" }));
-          logEvent("Day closed — all agents sleeping");
+          logEvent("Day closed — all sleeping");
           break;
 
         case "resumed":
           setDayInfo({ day: data.day ?? 1, status: "active" });
-          // Wake sequence: walking → typing
           setAgents((prev) => prev.map((a) => ({ ...a, state: "walking" as const, message: "☀️ Waking up…" })));
-          logEvent(`Day ${data.day} — agents waking up`);
+          logEvent(`Day ${data.day} — waking up`);
           setTimeout(() => {
             setAgents((prev) => prev.map((a) => ({ ...a, state: "idle" as const, message: undefined })));
           }, 2000);
@@ -184,11 +270,11 @@ function App() {
       <header className="office-header">
         <div className="office-header-left">
           <h1>🏢 ClearBorder Office</h1>
-          <span className="office-subtitle">Agent Visualization Shell</span>
+          <span className="office-subtitle">Pixel Agent Visualization</span>
         </div>
         <div className="office-header-right">
           <span className={`office-day ${dayInfo.status}`}>
-            Day {dayInfo.day} · {dayInfo.status === "active" ? "Active" : "Closed"}
+            Day {dayInfo.day} · {dayInfo.status === "active" ? "☀️ Active" : "🌙 Closed"}
           </span>
           <span className={`office-ws ${wsConnected ? "on" : "off"}`}>
             <span className="dot" />
@@ -197,43 +283,28 @@ function App() {
         </div>
       </header>
 
-      {/* Agent Grid */}
+      {/* Main */}
       <main className="office-main">
-        <div className="agents-grid">
+        {/* Office Floor */}
+        <div className={`office-floor ${dayInfo.status}`}>
+          {/* Floor grid */}
+          <div className="floor-grid" />
+
+          {/* Decorations */}
+          <div className="office-decor plant-1">🌿</div>
+          <div className="office-decor plant-2">🪴</div>
+          <div className="office-decor coffee">☕</div>
+          <div className="office-decor clock">🕐</div>
+
+          {/* Company sign */}
+          <div className="company-sign">
+            <span>CLEARBORDER</span>
+            <span className="sign-sub">Customs Intelligence</span>
+          </div>
+
+          {/* Agents at workstations */}
           {agents.map((agent) => (
-            <div key={agent.id} className={`agent-card ${agent.state}`} style={{ "--agent-color": agent.color } as React.CSSProperties}>
-              {/* Avatar */}
-              <div className="agent-avatar">
-                <span className="agent-emoji">{agent.emoji}</span>
-                <div className={`agent-state-ring ${agent.state}`} />
-              </div>
-
-              {/* Name & Role */}
-              <div className="agent-identity">
-                <h2 className="agent-name">{agent.name}</h2>
-                <span className="agent-role">{agent.role}</span>
-              </div>
-
-              {/* Status */}
-              <div className={`agent-status ${agent.state}`}>
-                <span className="status-icon">{STATE_LABELS[agent.state].icon}</span>
-                <span className="status-text">{STATE_LABELS[agent.state].label}</span>
-              </div>
-
-              {/* Speech bubble */}
-              {agent.message && (
-                <div className="speech-bubble">
-                  {agent.message}
-                </div>
-              )}
-
-              {/* Activity animation */}
-              {(agent.state === "typing" || agent.state === "reading") && (
-                <div className="activity-bar">
-                  <div className="activity-pulse" />
-                </div>
-              )}
-            </div>
+            <PixelAgent key={agent.id} agent={agent} />
           ))}
         </div>
 
@@ -245,7 +316,7 @@ function App() {
           </div>
           <div className="event-log-feed" ref={logRef}>
             {eventLog.length === 0 ? (
-              <div className="event-empty">Waiting for backend events…</div>
+              <div className="event-empty">Waiting for events…</div>
             ) : (
               eventLog.map((e, i) => (
                 <div key={i} className="event-entry">
