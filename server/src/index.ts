@@ -277,6 +277,7 @@ app.post<{ Params: { caseId: string } }>(
         await caseStore.updateDiscrepancyStatus(caseId, updatedDiscrepancies);
       }
 
+      broadcast("correction_submitted", { caseId, correction: result.correction });
       broadcast("case_updated", { caseId });
 
       return { status: "submitted", correction: result.correction };
@@ -294,10 +295,25 @@ app.post<{ Params: { caseId: string } }>(
 
     try {
       await rejectSubmit(caseId);
+      broadcast("correction_rejected", { caseId });
       return { status: "rejected" };
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
     }
+  }
+);
+
+// ========================================
+// REST routes — Day Close / Resume (Phase 4)
+// ========================================
+
+// Close the current day session — triggers sleep animation in office
+app.post<{ Body: { caseId: string } }>(
+  "/api/day/close",
+  async (req) => {
+    const { caseId } = req.body;
+    broadcast("day_closed", { caseId, message: "Session closed — all agents sleeping" });
+    return { status: "closed" };
   }
 );
 

@@ -156,6 +156,8 @@ export default function App() {
     message: string;
   } | null>(null);
   const [isCorrecing, setIsCorrecing] = useState(false);
+  const [sessionClosed, setSessionClosed] = useState(false);
+  const [savedEnvironmentId, setSavedEnvironmentId] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -215,6 +217,14 @@ export default function App() {
               break;
             case "computer_use_step":
               showToast("info", `🖥️ ${msg.data.step.description}`);
+              break;
+            case "day_closed":
+              showToast("info", "🌙 Day closed — all agents sleeping");
+              break;
+            case "resumed":
+              showToast("success", `☀️ Day ${msg.data.day} — agents waking up!`);
+              setSessionClosed(false);
+              refreshCase();
               break;
           }
         } catch { /* ignore parse errors */ }
@@ -328,6 +338,36 @@ export default function App() {
     setConfirmCard(null);
   }
 
+  // --- Day Close / Resume ---
+  async function closeSession() {
+    if (!caseFile) return;
+    setSavedEnvironmentId(caseFile.environmentId);
+    setSessionClosed(true);
+    // Emit day_closed event via server
+    await fetch(`${API}/api/day/close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caseId: caseFile.caseId }),
+    });
+    showToast("info", '🌙 Session closed. "Everything the other agents forget, ClearBorder keeps."');
+  }
+
+  async function resumeSession() {
+    if (!savedEnvironmentId) return;
+    const res = await fetch(`${API}/api/cases/resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ environmentId: savedEnvironmentId }),
+    });
+    if (res.ok) {
+      const cf = await res.json();
+      setCaseFile(cf);
+      setSessionClosed(false);
+      setMessageLoaded(true);
+      showToast("success", `☀️ Day ${cf.day} — resumed exactly where we stopped!`);
+    }
+  }
+
   // --- Format time ---
   function formatTime(ts: string): string {
     try {
@@ -369,6 +409,26 @@ export default function App() {
         </div>
         <div className="header-right">
           {caseFile && <span className="day-badge">Day {caseFile.day}</span>}
+          {caseFile && !sessionClosed && (
+            <button
+              className="btn danger"
+              style={{ fontSize: "0.65rem", padding: "0.25rem 0.625rem" }}
+              onClick={closeSession}
+              id="closeSessionBtn"
+            >
+              🌙 Close Session (Day +1)
+            </button>
+          )}
+          {sessionClosed && (
+            <button
+              className="btn success"
+              style={{ fontSize: "0.65rem", padding: "0.25rem 0.625rem" }}
+              onClick={resumeSession}
+              id="resumeSessionBtn"
+            >
+              ☀️ Resume (Day 2)
+            </button>
+          )}
           <span className={`status-badge ${wsConnected ? "connected" : "disconnected"}`}>
             <span className="status-dot" />
             {wsConnected ? "Connected" : "Disconnected"}

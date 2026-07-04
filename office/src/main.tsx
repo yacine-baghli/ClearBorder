@@ -147,6 +147,16 @@ function App() {
           logEvent("Awaiting confirmation before submit", "portal");
           break;
 
+        case "correction_submitted":
+          setAgentTemporary("portal", "typing", "✅ Correction submitted!", 3000);
+          logEvent("Correction approved & submitted", "portal");
+          break;
+
+        case "correction_rejected":
+          updateAgent("portal", { state: "idle", message: undefined });
+          logEvent("Correction rejected — standing down", "portal");
+          break;
+
         case "day_closed":
           setAgents((prev) => prev.map((a) => ({ ...a, state: "sleeping" as const, message: "💤 End of day" })));
           setDayInfo((prev) => ({ ...prev, status: "closed" }));
