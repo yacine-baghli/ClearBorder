@@ -22,7 +22,17 @@ import {
   rejectSubmit,
   getPendingCorrection,
 } from "./computer-use.js";
-import type { CaseFile, DocKind } from "@clearborder/core";
+import { OrderStore } from "./orderStore.js";
+import {
+  initMemorySession,
+  startSessionLoop,
+  registerSession,
+  checkCase,
+  getSessionStatus,
+  markSessionIdle,
+  listSessions,
+} from "./memorySession.js";
+import type { CaseFile, DocKind, OrderSnapshot } from "@clearborder/core";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
 const CASE_STORE = process.env.CASE_STORE ?? "local";
@@ -37,6 +47,18 @@ function createCaseStore() {
 }
 
 const caseStore = createCaseStore();
+const orderStore = new OrderStore("clearborder.db");
+
+// Seed a default order for the demo
+orderStore.seed("SHIP-RESTART-001");
+
+// Initialize memory session worker
+initMemorySession({
+  caseStore,
+  orderStore,
+  startCorrection,
+  intervalMs: parseInt(process.env.SESSION_INTERVAL_MS ?? "20000", 10),
+});
 
 // --- Fastify setup ---
 const app = Fastify({ logger: true });
@@ -279,6 +301,7 @@ app.post<{ Params: { caseId: string } }>(
 
       broadcast("correction_submitted", { caseId, correction: result.correction });
       broadcast("case_updated", { caseId });
+      markSessionIdle(caseId);
 
       return { status: "submitted", correction: result.correction };
     } catch (e: any) {
@@ -296,6 +319,7 @@ app.post<{ Params: { caseId: string } }>(
     try {
       await rejectSubmit(caseId);
       broadcast("correction_rejected", { caseId });
+      markSessionIdle(caseId);
       return { status: "rejected" };
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
@@ -318,6 +342,77 @@ app.post<{ Body: { caseId: string } }>(
 );
 
 // ========================================
+// REST routes — Orders (Live Product Mode)
+// ========================================
+
+// Get order by ref
+app.get<{ Params: { ref: string } }>("/api/orders/:ref", async (req) => {
+  const order = orderStore.get(req.params.ref);
+  if (!order) return { error: "Order not found" };
+  return order;
+});
+
+// List all orders
+app.get("/api/orders", async () => {
+  return orderStore.list();
+});
+
+// Update order fields — bumps version, emits order_changed event
+app.put<{ Params: { ref: string }; Body: { fields: OrderSnapshot["fields"] } }>(
+  "/api/orders/:ref",
+  async (req) => {
+    const { ref } = req.params;
+    const { fields } = req.body;
+    const updated = orderStore.upsert(ref, fields);
+    broadcast("order_changed", { ref: updated.ref, version: updated.version, fields: updated.fields });
+
+    // Instant trigger: find linked case and check immediately (debounced)
+    const cases = await Promise.all(
+      listSessions().map(s => caseStore.get(s.caseId))
+    );
+    for (const c of cases) {
+      if (c && c.shipment.ref === ref) {
+        setTimeout(() => checkCase(c.caseId), 500); // debounce 500ms
+      }
+    }
+
+    return updated;
+  }
+);
+
+// ========================================
+// REST routes — Session (Memory Session Worker)
+// ========================================
+
+// Get session status
+app.get<{ Params: { caseId: string } }>("/api/session/:caseId/status", async (req) => {
+  const status = getSessionStatus(req.params.caseId);
+  if (!status) return { error: "No active session for this case" };
+  return status;
+});
+
+// Force an immediate check
+app.post<{ Params: { caseId: string } }>("/api/session/:caseId/check-now", async (req) => {
+  await checkCase(req.params.caseId);
+  return { status: "checked" };
+});
+
+// List all sessions
+app.get("/api/sessions", async () => {
+  return listSessions();
+});
+
+// Register a case for monitoring (creates session)
+app.post<{ Body: { caseId: string; environmentId: string; orderRef: string } }>(
+  "/api/session/register",
+  async (req) => {
+    const { caseId, environmentId, orderRef } = req.body;
+    const session = registerSession(caseId, environmentId, orderRef);
+    return session;
+  }
+);
+
+// ========================================
 // Start
 // ========================================
 
@@ -326,6 +421,9 @@ try {
   console.log(`🚀 ClearBorder server running on http://localhost:${PORT}`);
   console.log(`   CaseStore: ${CASE_STORE}`);
   console.log(`   Demo mode: ${process.env.DEMO_MODE ?? "false"}`);
+
+  // Start the memory session loop
+  startSessionLoop();
 } catch (err) {
   app.log.error(err);
   process.exit(1);

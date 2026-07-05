@@ -53,3 +53,28 @@ export interface CaseStore {
   append(caseId: string, patch: Partial<CaseFile>): Promise<CaseFile>;
   detectDiscrepancies(caseId: string): Promise<Discrepancy[]>;
 }
+
+// ── Live Product Mode types ──
+
+/** A versioned order snapshot — the source of truth the updater edits. */
+export interface OrderSnapshot {
+  ref: string;                 // shipment/order ref — links to the CaseFile
+  version: number;             // bumped on every update
+  updatedAt: string;
+  fields: {
+    invoiceValue?: number;
+    packingListValue?: number;
+    hsCode?: string;
+    valueProofUrl?: string;
+  };
+}
+
+/** Tracks what the memory session has already reconciled on a CaseFile. */
+export interface CaseSessionState {
+  environmentId: string;
+  caseId: string;
+  lastProcessedOrderVersion: number;   // idempotency marker
+  lastCheckedAt?: string;
+  nextCheckAt?: string;
+  status: "idle" | "checking" | "reconciling" | "awaiting_approval";
+}

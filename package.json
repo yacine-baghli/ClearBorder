@@ -7,10 +7,12 @@
     "server",
     "console",
     "portal",
-    "office"
+    "office",
+    "admin"
   ],
   "scripts": {
     "dev": "concurrently -n server,console,portal,office -c blue,green,magenta,cyan \"npm run dev -w server\" \"npm run dev -w console\" \"npm run dev -w portal\" \"npm run dev -w office\"",
+    "dev:live": "concurrently -n server,office,admin -c blue,cyan,yellow \"npm run dev -w server\" \"npm run dev -w office\" \"npm run dev -w admin\"",
     "test": "npm run test -w server",
     "build": "npm run build -w packages/core && npm run build -w server && npm run build -w office",
     "build:pages": "npm run build -w office"

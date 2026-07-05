@@ -957,3 +957,154 @@ body {
 .office-ws.on .dot { background: var(--success); animation: blink 1.5s step-end infinite; }
 .office-ws.off { color: var(--error); }
 .office-ws.off .dot { background: var(--error); }
+
+/* ===== LIVE MODE ===== */
+
+.live-mode {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.live-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1.5rem;
+  background: rgba(15, 23, 42, 0.95);
+  border-bottom: 1px solid var(--border);
+  z-index: 100;
+}
+
+.live-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.live-logo { font-size: 1.5rem; }
+
+.live-title {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.8rem;
+  color: var(--accent);
+  letter-spacing: 0.15em;
+  margin: 0;
+}
+
+.live-badge {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.45rem;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  animation: livePulse 2s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.live-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ws-indicator {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.4rem;
+  color: var(--error);
+}
+.ws-indicator.connected { color: var(--success); }
+
+.live-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.live-office-floor {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.live-office-floor .company-sign {
+  position: absolute;
+  top: 3%;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  z-index: 20;
+}
+
+.live-office-floor .office-floor {
+  flex: 1;
+  position: relative;
+  background:
+    radial-gradient(ellipse at 50% 80%, rgba(59,130,246,0.05) 0%, transparent 70%),
+    linear-gradient(180deg, #0f172a 0%, #111827 100%);
+}
+
+.live-side-panel {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  border-left: 2px solid var(--border);
+  background: var(--bg-secondary);
+  overflow-y: auto;
+}
+
+.live-side-panel .casefile-memory {
+  border-left: none;
+  flex-shrink: 0;
+}
+
+.change-feed {
+  flex: 1;
+  padding: 1rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow-y: auto;
+}
+
+.feed-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.feed-entry {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  border-left: 2px solid var(--border);
+  animation: factSlideIn 0.3s ease;
+}
+
+.live-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 1.5rem;
+  background: rgba(15, 23, 42, 0.95);
+  border-top: 1px solid var(--border);
+  font-family: 'Press Start 2P', monospace;
+  font-size: 0.35rem;
+  color: var(--text-muted);
+}
+
+.footer-status { color: var(--success); }
+.ws-dot { color: var(--text-muted); }
+.ws-dot.connected { color: var(--success); }
+

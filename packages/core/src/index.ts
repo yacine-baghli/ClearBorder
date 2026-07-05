@@ -6,4 +6,6 @@ export {
   type Shipment,
   type CaseFile,
   type CaseStore,
+  type OrderSnapshot,
+  type CaseSessionState,
 } from "./case.js";

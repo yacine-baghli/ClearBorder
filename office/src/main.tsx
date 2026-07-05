@@ -4,6 +4,7 @@ import "./index.css";
 import DemoController, { DemoAPI } from "./demo/DemoController";
 import { Beat, DemoState, SceneId } from "./demo/types";
 import DEMO_SCRIPT from "./demo/demo-script";
+import LiveMode from "./LiveMode";
 
 // =====================================================
 // ClearBorder Office — Demo Mode (Scene-based)
@@ -455,6 +456,14 @@ function App() {
   );
 }
 
+// ── Mode Router ──
+function Root() {
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get("mode");
+  if (mode === "live") return <LiveMode />;
+  return <App />;
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode><App /></React.StrictMode>
+  <React.StrictMode><Root /></React.StrictMode>
 );
