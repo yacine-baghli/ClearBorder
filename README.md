@@ -2,7 +2,7 @@
 
 **AI-powered customs clearance that chains Live Translate, a persistent CaseFile, and Computer Use into one agent pipeline — so shipments clear faster and nothing gets lost between days.**
 
-> Built for the RAISE Hackathon 2025 — Polytechnique
+> Built for the RAISE Hackathon 2026
 
 ---
 
