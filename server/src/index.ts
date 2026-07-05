@@ -26,6 +26,7 @@ import { OrderStore } from "./orderStore.js";
 import {
   initMemorySession,
   startSessionLoop,
+  stopSessionLoop,
   registerSession,
   checkCase,
   getSessionStatus,
@@ -411,6 +412,19 @@ app.post<{ Body: { caseId: string; environmentId: string; orderRef: string } }>(
     return session;
   }
 );
+
+// ========================================
+// Reset (for demo)
+// ========================================
+
+app.post("/api/reset", async () => {
+  orderStore.reset();
+  orderStore.seed("SHIP-RESTART-001");
+  stopSessionLoop();
+  startSessionLoop();
+  broadcast("reset", { message: "All state cleared" });
+  return { status: "reset" };
+});
 
 // ========================================
 // Start

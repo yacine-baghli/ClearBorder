@@ -92,6 +92,11 @@ export default function LiveMode() {
   const [approvalPending, setApprovalPending] = useState(false);
   const [caseId, setCaseId] = useState<string | null>(null);
   const [changeFeed, setChangeFeed] = useState<string[]>([]);
+  const [sessionStatus, setSessionStatus] = useState<string>("idle");
+  const [lastChecked, setLastChecked] = useState<string | null>(null);
+  const [nextCheck, setNextCheck] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [sessionRegistered, setSessionRegistered] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   // ── Agent helpers ──
@@ -202,6 +207,63 @@ export default function LiveMode() {
     await fetch(`${API}/api/cases/${caseId}/reject`, { method: "POST" });
   };
 
+  // ── Session registration ──
+  const handleSetupSession = async () => {
+    // Create a case first
+    const res = await fetch(`${API}/api/cases`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shipment: { ref: "SHIP-RESTART-001", origin: "Shenzhen, China", destination: "Hamburg, Germany", hsCode: "8541.40.90" } }),
+    });
+    const caseFile = await res.json();
+    setCaseId(caseFile.caseId);
+
+    // Register session
+    await fetch(`${API}/api/session/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caseId: caseFile.caseId, environmentId: caseFile.environmentId, orderRef: "SHIP-RESTART-001" }),
+    });
+    setSessionRegistered(true);
+    setChangeFeed(prev => [`${new Date().toLocaleTimeString()} — Session registered for ${caseFile.caseId.slice(0, 8)}…`, ...prev].slice(0, 20));
+  };
+
+  // ── Session HUD polling ──
+  useEffect(() => {
+    if (!caseId || !sessionRegistered) return;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API}/api/session/${caseId}/status`);
+        const data = await res.json();
+        if (!data.error) {
+          setSessionStatus(data.status);
+          setLastChecked(data.lastCheckedAt ?? null);
+          setNextCheck(data.nextCheckAt ?? null);
+        }
+      } catch {}
+    };
+    poll();
+    const iv = setInterval(poll, 3000);
+    return () => clearInterval(iv);
+  }, [caseId, sessionRegistered]);
+
+  // ── Countdown timer ──
+  useEffect(() => {
+    if (!nextCheck) { setCountdown(null); return; }
+    const tick = () => {
+      const diff = Math.max(0, Math.round((new Date(nextCheck).getTime() - Date.now()) / 1000));
+      setCountdown(diff);
+    };
+    tick();
+    const iv = setInterval(tick, 1000);
+    return () => clearInterval(iv);
+  }, [nextCheck]);
+
+  const handleCheckNow = async () => {
+    if (!caseId) return;
+    await fetch(`${API}/api/session/${caseId}/check-now`, { method: "POST" });
+  };
+
   return (
     <div className="office-app live-mode">
       {/* Header */}
@@ -233,6 +295,40 @@ export default function LiveMode() {
 
         {/* Side panel */}
         <div className="live-side-panel">
+          {/* Session HUD */}
+          <div className="session-hud">
+            <div className="memory-header">
+              🧠 <span style={{ color: "var(--accent)" }}>Memory Session</span>
+            </div>
+            {!sessionRegistered ? (
+              <div className="hud-setup">
+                <p className="memory-empty">No active session — register a case to start monitoring.</p>
+                <button className="btn-setup" onClick={handleSetupSession}>🚀 Start Monitoring</button>
+              </div>
+            ) : (
+              <div className="hud-active">
+                <div className={`hud-status-indicator ${sessionStatus}`}>
+                  <span className="hud-dot" />
+                  <span className="hud-status-text">
+                    {sessionStatus === "idle" ? "Idle" :
+                     sessionStatus === "checking" ? "Checking…" :
+                     sessionStatus === "reconciling" ? "Reconciling…" :
+                     sessionStatus === "awaiting_approval" ? "⚠ Awaiting Approval" : sessionStatus}
+                  </span>
+                </div>
+                <div className="hud-row">
+                  <span className="hud-label">Last check:</span>
+                  <span className="hud-value">{lastChecked ? new Date(lastChecked).toLocaleTimeString() : "—"}</span>
+                </div>
+                <div className="hud-row">
+                  <span className="hud-label">Next check:</span>
+                  <span className="hud-value">{countdown !== null ? `${countdown}s` : "—"}</span>
+                </div>
+                <button className="btn-check-now" onClick={handleCheckNow}>🔍 Check Now</button>
+              </div>
+            )}
+          </div>
+
           {/* CaseFile Memory */}
           <div className="casefile-memory">
             <div className="memory-header">
