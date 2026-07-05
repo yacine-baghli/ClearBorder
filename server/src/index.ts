@@ -6,8 +6,8 @@ import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
-import { LocalCaseStore } from "./case-store/local.ts";
-import { addClient, broadcast } from "./events.ts";
+import { LocalCaseStore } from "./case-store/local.js";
+import { addClient, broadcast } from "./events.js";
 import {
   openTranslateSession,
   simulateDemoCall,
@@ -15,13 +15,13 @@ import {
   getSessionInfo,
   closeSession,
   mintEphemeralToken,
-} from "./live-translate.ts";
+} from "./live-translate.js";
 import {
   startCorrection,
   confirmSubmit,
   rejectSubmit,
   getPendingCorrection,
-} from "./computer-use.ts";
+} from "./computer-use.js";
 import type { CaseFile, DocKind } from "@clearborder/core";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);

@@ -4,7 +4,7 @@
 // Backend opens the session and can mint ephemeral tokens with locked translationConfig.
 // All secrets stay server-side — console gets ephemeral tokens only.
 
-import { broadcast } from "./events.ts";
+import { broadcast } from "./events.js";
 
 // --- Types ---
 
@@ -237,7 +237,7 @@ export async function mintEphemeralToken(
       );
 
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as { token: string; expiresAt: string };
         return {
           token: data.token,
           expiresAt: data.expiresAt,

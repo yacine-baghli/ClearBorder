@@ -12,7 +12,7 @@
 //   - Live mode: Playwright + Gemini 2.5 Computer Use (screenshot→action)
 // =====================================================================
 
-import { broadcast } from "./events.ts";
+import { broadcast } from "./events.js";
 import type { CaseFile, Discrepancy } from "@clearborder/core";
 
 // --- Types ---

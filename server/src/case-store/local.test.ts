@@ -3,7 +3,7 @@
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { LocalCaseStore } from "./local.ts";
+import { LocalCaseStore } from "./local.js";
 import { unlinkSync, existsSync } from "node:fs";
 
 const TEST_DB = "test-casestore.db";
